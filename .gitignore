@@ -6,3 +6,5 @@ calculator/pkg/__pycache__/
 
 calculator/*.txt
 calculator/pkg/*.txt
+
+tests.py
