@@ -7,6 +7,7 @@ from function.get_files_info import get_files_info, get_file_content, write_file
 from function.run_python_file import run_python_file
 from prompts import system_prompt
 from functions import available_functions
+from config import WORKING_DIR
 
 
 def main():
@@ -31,7 +32,21 @@ def main():
         types.Content(role="user", parts=[types.Part(text=user_prompt)]),
     ]
 
-    generate_code(client, messages, verbose)
+    for i in range(20):
+        try:
+            response = generate_code(client, messages, verbose)
+
+            if response.text and not response.function_calls:
+                print("Final response:\n")
+                print(response.text)
+                break
+
+        except Exception as e:
+            if "429 RESOURCE_EXHAUSTED" in str(e):
+                print("Gemini's resource exhausted, wait some time before trying again.")
+                break
+            elif "'str' object has no attribute 'text'" in str(e):
+                continue
 
 def generate_code(client, messages, verbose):
     response = client.models.generate_content(
@@ -43,17 +58,30 @@ def generate_code(client, messages, verbose):
         print("Prompt tokens:", response.usage_metadata.prompt_token_count)
         print("Response tokens:", response.usage_metadata.candidates_token_count)
 
+    if response.candidates:
+        for candidate in response.candidates:
+            function_call_content = candidate.content
+            messages.append(function_call_content)
+
     if not response.function_calls:
         return response.text
 
+    function_responses = []
     for function_call_part in response.function_calls:
         function_call_result = call_function(function_call_part, verbose)
-        
-        if not function_call_result.parts[0].function_response.response:
-            raise Exception("no response found.")
-        
-        if function_call_result.parts[0].function_response.response and verbose:
+        if (
+            not function_call_result.parts
+            or not function_call_result.parts[0].function_response
+        ):
+            raise Exception("empty function call result")
+        if verbose:
             print(f"-> {function_call_result.parts[0].function_response.response}")
+        function_responses.append(function_call_result.parts[0])
+
+    if not function_responses:
+        raise Exception("no function responses generated, exiting.")
+
+    messages.append(types.Content(role="tool", parts=function_responses))
 
 
 
@@ -63,62 +91,32 @@ def call_function(function_call_part, verbose=False):
     else:
         print(f" - Calling function: {function_call_part.name}")
 
+    function_map = {
+        "get_files_info": get_files_info,
+        "get_file_content": get_file_content,
+        "run_python_file": run_python_file,
+        "write_file": write_file,
+    }
     function_name = function_call_part.name
-    fucntion_args = function_call_part.args
-    fucntion_args["working_directory"] = "./calculator"
-
-    match function_call_part.name:
-        case "get_files_info":
-            function_result = get_files_info(**fucntion_args)
-            return types.Content(
-                role="tool",
-                parts=[
-                    types.Part.from_function_response(
-                        name=function_name,
-                        response={"result": function_result}
-                    )
-                ],
-            )
-        case "get_file_content":
-            function_result = get_file_content(**fucntion_args)
-            return types.Content(
-                role="tool",
-                parts=[
-                    types.Part.from_function_response(
-                        name=function_name,
-                        response={"result": function_result}
-                    )
-                ],
-            )
-        case "run_python_file":
-            function_result = run_python_file(**fucntion_args)
-            return types.Content(
-                role="tool",
-                parts=[
-                    types.Part.from_function_response(
-                        name=function_name,
-                        response={"result": function_result}
-                    )
-                ],
-            )
-        case "write_file":
-            function_result = write_file(**fucntion_args)
-            return types.Content(
-                role="tool",
-                parts=[
-                    types.Part.from_function_response(
-                        name=function_name,
-                        response={"result": function_result}
-                    )
-                ],
-            )
-        
+    if function_name not in function_map:
+        return types.Content(
+            role="tool",
+            parts=[
+                types.Part.from_function_response(
+                    name=function_name,
+                    response={"error": f"Unknown function: {function_name}"},
+                )
+            ],
+        )
+    args = dict(function_call_part.args)
+    args["working_directory"] = WORKING_DIR
+    function_result = function_map[function_name](**args)
     return types.Content(
         role="tool",
         parts=[
             types.Part.from_function_response(
                 name=function_name,
-                response={"error": f"Unknown function: {function_name}"},
+                response={"result": function_result},
             )
         ],
     )
