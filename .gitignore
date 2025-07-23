@@ -8,3 +8,6 @@ calculator/*.txt
 calculator/pkg/*.txt
 
 tests.py
+
+.python-version
+uv.lock

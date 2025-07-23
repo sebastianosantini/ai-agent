@@ -60,7 +60,7 @@ def get_file_content(working_directory, file_path):
             file_content_str = f.read(MAX_CHARS)
             result.append(file_content_str)
 
-            if f.read() is not "":
+            if f.read() != "":
                 result.append(f'[...File "{target_file_path}" truncated at 10000 characters]')
 
         return "\n".join(result)
